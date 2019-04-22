@@ -1,0 +1,546 @@
+<html>
+    <head>
+        <title>Dino Jump</title>
+        <script src="//cdn.jsdelivr.net/npm/phaser@3.16.2/dist/phaser.js"></script>
+        <style media='screen' type='text/css'>
+            @font-face {
+              font-family: font1;
+              src: url('assets/font/bitfont.ttf');
+            }
+            .fontLoader {
+                position: absolute;
+                left:0px;
+                visibility: hidden;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="fontLoader" style="font-family: font1;"></div>
+            <script>
+
+                var config = {
+                    type : Phaser.AUTO,
+                    scale: {
+                        width: 900,
+                        height: 720,
+                        mode: Phaser.Scale.FIT,
+                        autoCenter: Phaser.Scale.CENTER_BOTH
+                    },
+                    physics: {
+                        default: 'arcade',
+                        arcade: {
+                            gravity: { y: 2900 },
+                            debug: false
+                        }
+                    },
+                    backgroundColor : "#ffffff",
+                    scene:{
+                        preload: preload,
+                        create : create,
+                        update : update
+                        }
+
+                    };
+
+
+                var myself = this;
+                var game = new Phaser.Game(config);
+
+                //Global reference to the Dino player
+                var player;
+               
+                var clouds,mud,ground;
+                var levelUpSFX, jumpSFX,deadSFX;
+
+                var cursors,spaceKey;
+                var isGameStarted;
+
+                var obstacles = new Array();
+                var score, highscore;
+                var scoreText, highscoreText;
+                var gameOver;
+
+                var minTimeBetweenSpawn = 3000;
+                var nextTimeToSpawn = 0;
+                var scoreInterval = 1000;
+
+                var counter = 0;
+
+                var obstacle;
+                var restart;
+
+                var obstacleMoveVelocity = 700, parallaxMoveVelocity = 5, scoreMoveSpeed = 6, obstaclesRangeMin = 1, obstaclesRangeMax = 3, minObstacleSpawnTime = 750,maxObstacleSpawnTime = 2000;
+                var colorTint,originalColor = 0x000000,colorChangeCount = 0;
+                var camera;
+                var colorOnTime = 0,colorChanged;
+                var highscoreLabel;
+                var timer;
+                var mobileTouch = false;
+
+                function preload(){
+
+                    timer = this.time;
+                    this.load.image('ground','assets/sprites/ground2.png');
+                    this.load.image('clouds','assets/sprites/clouds.png');
+                    this.load.image('mud','assets/sprites/mud1.png');
+                    this.load.image('refresh','assets/sprites/refresh.png');
+                  
+                    this.load.audio('levelup','assets/audio/pickup.ogg');
+                    this.load.audio('jump','assets/audio/jump.ogg');
+                    this.load.audio('dead','assets/audio/dead.ogg');
+                    for(var i = 1 ; i <= 7; i++){
+                        this.load.image('cactus_' + i,'assets/sprites/cactus_'  + i + '.png');
+                    }
+
+                    //Trex spritesheet
+                    this.load.spritesheet('player', 'assets/sprites/player.png',{ 
+                        frameWidth: 88, 
+                        frameHeight: 94,
+                        endframe: 6
+                    }
+                    ); 
+
+                    //Flying dino spritesheet
+                    this.load.spritesheet('flyingdino', 'assets/sprites/flying_dino.png',{ 
+                        frameWidth: 50, 
+                        frameHeight: 30,
+                        endframe: 2
+                    }
+                    ); 
+
+                }
+
+                function create(){
+                    this.cameras.main.setBackgroundColor(0xffffff);
+                    camera = this.cameras.main;
+
+
+                    colorTint = 0x535353;
+                    console.log(game.config.width + "Started the game once again");
+
+                    clouds = this.add.tileSprite(0,200,this.game.width,128,'clouds');
+                    mud = this.add.tileSprite(500,425,this.game.width,128,'mud');
+                    clouds.tint = colorTint;
+                    mud.tint = colorTint;
+                    
+                    highscore = localStorage.getItem('highscore');
+
+                    //Add Highscore
+                    highscoreLabel = this.add.text(game.config.width - 250, 100, 'HI', { fontFamily: 'font1', fontSize: 16, color: '#474747' });
+                    
+                    highscoreText =  this.add.text(game.config.width - 200, 100, '000000', { fontFamily: 'font1', fontSize: 16, color: '#474747' });
+
+
+                    scoreText =  this.add.text(game.config.width - 100, 100, '000000', { fontFamily: 'font1', fontSize: 16, color: '#474747' });
+
+                    highscoreText.text = zeroPad(highscore,5);
+
+                    score = 0;
+                    restart = this.add.image(425,275,'refresh');
+                    restart.setScale(.50);
+                    restart.setInteractive()
+                    .on('pointerover', () =>  {
+                        var tween = this.tweens.add({
+                        targets: restart,
+                        scaleX: 0.75,               // '+=100'
+                        scaleY: 0.75,                   // '+=100'
+                        ease: 'Linear',       // 'Cubic', 'Elastic', 'Bounce', 'Back'
+                        duration: 100,
+                        repeat: 0,            // -1: infinity
+                        yoyo: false
+                    });   
+                    } )
+                    .on('pointerout', () => {
+                        var tween = this.tweens.add({
+                        targets: restart,
+                        scaleX: 0.50,               // '+=100'
+                        scaleY: 0.50,                   // '+=100'
+                        ease: 'Linear',       // 'Cubic', 'Elastic', 'Bounce', 'Back'
+                        duration: 100,
+                        repeat: 0,            // -1: infinity
+                        yoyo: false
+                    });   
+                    } )
+                    .on('pointerdown', () =>  {
+                        obstacles = [];
+                        this.scene.restart();
+                        gameOver = false;
+                    } );
+                    restart.visible = false;
+
+                    //Adding Ground
+                    //var ground = this.physics.add.image(400,400,'ground');
+                    ground = this.add.tileSprite(450,400,this.game.width,20,'ground');
+                    this.physics.add.existing(ground);
+                    ground.body.setOffset(0,100);
+                    ground.displayHeight = 20;
+                    ground.body.allowGravity = false;
+                    ground.body.setImmovable(true);
+                    ground.tint = colorTint;
+                    
+                
+                    //Adding Player 
+                    player = this.physics.add.sprite(ground.x - 200,415, 'player').setOrigin(.5,1);
+                    player.body.setSize(55,80,10,10);
+                    player.setScale(.75);
+                    player.setCollideWorldBounds(true);
+                    player.body.onCollide = true;
+
+                    player.tint = colorTint;
+
+                    this.anims.create({
+                        key: 'run',
+                        frames: this.anims.generateFrameNumbers('player', { start: 2, end: 3 }),
+                        frameRate: 15,
+                        repeat: -1
+                    });
+
+                    this.anims.create({
+                        key: 'dead',
+                        frames: this.anims.generateFrameNumbers('player', { start: 4, end: 4 }),
+                        frameRate: 15,
+                        repeat: -1
+                    });
+
+
+                    cursors = this.input.keyboard.createCursorKeys();
+
+                    this.physics.add.collider(player, ground);
+                
+                    
+                    //Adding sounds
+                    levelUpSFX = this.sound.add('levelup');
+                    levelUpSFX.volume = .35;
+                    jumpSFX = this.sound.add('jump');
+                    deadSFX = this.sound.add('dead');
+                    jumpSFX.volume = .20;
+
+
+                    //#535353
+
+                    //Touch pointer for mobile devices
+                    this.input.on('pointerdown',function(){
+                        mobileTouch = true;
+                    },this);
+
+                    this.input.on('pointerup',function(){
+                        mobileTouch = false;
+                    },this);
+                } 
+
+
+                function update(){
+
+                    setVariablesFromScore();
+                    
+                    if(isGameStarted){
+
+                        if(this.time.now > colorOnTime){
+                            console.log('inside this loop');
+                            changeColor();
+                            colorOnTime = this.time.now + 20;
+                        }
+                       
+
+
+                        clouds.tilePositionX += (parallaxMoveVelocity - 3);
+                        mud.tilePositionX += (parallaxMoveVelocity + 1);
+                        ground.tilePositionX += (parallaxMoveVelocity + 2);
+
+/***************************** ********************************/
+                        //Spawn only after certain time
+                        if(this.time.now > nextTimeToSpawn){
+                            
+                            let rand = Phaser.Math.Between(obstaclesRangeMin,obstaclesRangeMax);
+                            switch(rand){
+                                //Cactus
+                                case 1:
+                                //Single cactus 1
+                                    this.obstacle = this.physics.add.image(1000,420,'cactus_1').setOrigin(0.5,1);
+                                    this.obstacle.body.allowGravity = false;
+                                    this.obstacle.body.setSize(35,80,10,10);
+                                    this.obstacle.setScale(Phaser.Math.Between(80,95)/100);
+                                    this.obstacle.tint = colorTint;
+                                    this.physics.add.collider(player, this.obstacle,playerDeath,null,this); 
+                                break;
+                                case 2:
+                                //Single Cactus 2
+                                    this.obstacle = this.physics.add.image(1000,420,'cactus_2').setOrigin(0.5,1);
+                                    this.obstacle.body.allowGravity = false;
+                                    this.obstacle.body.setSize(35,80,10,10);
+                                    this.obstacle.tint = colorTint;
+                                    this.obstacle.setScale(Phaser.Math.Between(65,85)/100);
+                                    this.physics.add.collider(player, this.obstacle,playerDeath,null,this); 
+                                break;
+                                case 3:
+                                //Triple Cactus 1
+                                    this.obstacle = this.physics.add.image(1000,420,'cactus_3').setOrigin(0.5,1);
+                                    this.obstacle.body.allowGravity = false;
+                                    this.obstacle.body.setSize(70,50,10,10);
+                                    this.obstacle.tint = colorTint;
+                                    this.obstacle.setScale(Phaser.Math.Between(85,120)/100);
+                                    this.physics.add.collider(player, this.obstacle,playerDeath,null,this); 
+                                break;
+                                case 4:
+                                //Triple Cactus 1
+                                    this.obstacle = this.physics.add.image(1000,420,'cactus_4').setOrigin(0.5,1);
+                                    this.obstacle.tint = colorTint;
+                                    this.obstacle.body.allowGravity = false;
+                                    this.obstacle.body.setSize(35,80,10,10);
+                                    this.obstacle.setScale(Phaser.Math.Between(65,90)/100);
+                                    this.physics.add.collider(player, this.obstacle,playerDeath,null,this); 
+                                break;
+                                case 5:
+                                //Single Cactus 3
+                                    this.obstacle = this.physics.add.image(1000,420,'cactus_5').setOrigin(0.5,1.1);
+                                    this.obstacle.tint = colorTint;
+                                    this.obstacle.body.allowGravity = false;
+                                    this.obstacle.body.setSize(25,50,10,10);
+                                    this.obstacle.setScale(Phaser.Math.Between(100,120)/100);
+                                    this.physics.add.collider(player, this.obstacle,playerDeath,null,this); 
+                                break;
+                                case 6:
+                                //Single Cactus 4
+                                    this.obstacle = this.physics.add.image(1000,420,'cactus_6').setOrigin(0.5,1);
+                                    this.obstacle.tint = colorTint;
+                                    this.obstacle.body.allowGravity = false;
+                                    this.obstacle.body.setSize(90,65,10,10);
+                                    this.obstacle.setScale(Phaser.Math.Between(85,100)/100);
+                                    this.physics.add.collider(player, this.obstacle,playerDeath,null,this); 
+
+                                break;
+                                case 7:
+                                //Triple Cactus 2
+                                    this.obstacle = this.physics.add.image(1000,420,'cactus_7').setOrigin(0.5,1);
+                                    this.obstacle.tint = colorTint;
+                                    this.obstacle.body.allowGravity = false;
+                                    this.obstacle.body.setSize(45,65,15,20);
+                                    this.obstacle.setScale(Phaser.Math.Between(85,100)/100);
+                                    this.physics.add.collider(player, this.obstacle,playerDeath,null,this); 
+                                break;
+                                
+                                case 8:
+                                    var flyingDinoPosY = 320;
+                                    if(Phaser.Math.Between(0,100) <= 50){
+                                        flyingDinoPosY = 320;
+                                    }
+                                    else{
+                                        flyingDinoPosY = 370;
+                                    }
+                                    this.obstacle = this.physics.add.sprite(1000,flyingDinoPosY,'flyingdino');
+                                    this.obstacle.tint = colorTint;
+                                    this.obstacle.body.allowGravity = false;
+                                    this.obstacle.body.setSize(35,15,20,10);
+                                    this.obstacle.setScale(1.35);
+                                    this.physics.add.collider(player, this.obstacle,playerDeath,null,this); 
+                                    this.anims.create({
+                                        key: 'fly',
+                                        frames: this.anims.generateFrameNumbers('flyingdino', { start: 0, end: 1 }),
+                                        frameRate: 5,
+                                        repeat: -1
+                                    });
+                                    this.obstacle.anims.play("fly");
+                                break;
+                            }
+                            obstacles.push(this.obstacle); 
+                            nextTimeToSpawn = this.time.now + minTimeBetweenSpawn;
+                            
+                            minTimeBetweenSpawn = Phaser.Math.Between(minObstacleSpawnTime,maxObstacleSpawnTime);
+                          
+                        }
+                        
+                        
+                        for(var i = 0 ; i < obstacles.length ; i++){
+                            if(obstacles[i].x < 0){
+                                //Removes the first element of the array
+                                obstacles.shift();
+                                //console.log('Remove this cactus');
+                            }
+                            else
+                            {
+                                
+                                obstacles[i].setVelocityX(-obstacleMoveVelocity);
+                            }
+                        }
+                       
+/***************************** ********************************/
+
+                        //console.log(this.time.now / scoreInterval);
+                        counter++;
+                        if(counter % scoreMoveSpeed == 0){
+                            score++;
+                            scoreText.text = zeroPad(score,5);
+                            if(score % 100 == 0){
+                                levelUpSFX.play();
+                            }
+                        }
+
+                    
+                        if(!player.body.touching.down){
+                            player.anims.play("run");
+                        }
+
+                    }
+
+
+                    if((cursors.up.isDown || cursors.space.isDown || mobileTouch) && player.body.touching.down){
+                        if(isGameStarted){
+                         
+                            player.setVelocityY (-900);
+                            jumpSFX.play();   
+                        }
+                        else{
+                            isGameStarted = true;
+
+                        }
+                        
+                    }
+
+                    if(gameOver){
+                        if(cursors.space.isDown || mobileTouch){
+                            console.log('Restart game');    
+                            obstacles = [];
+                            this.scene.restart();
+                            gameOver = false;
+                        }
+                    }
+
+                }
+
+                function setVariablesFromScore(){
+                    //Obstacle move velocity
+
+                    //Parallex effect move velocity
+                    
+                    //Score move velocity
+                    if(score < 100){
+                        this.obstaclesRangeMin = 1;
+                        this.obstaclesRangeMax = 3;
+                        this.obstacleMoveVelocity = 700;
+                        this.parallaxMoveVelocity = 5;
+                        this.scoreMoveSpeed = 6;
+
+                        this.minObstacleSpawnTime = 500;
+                        this.maxObstacleSpawnTime = 1500;
+                
+                    }
+                    else if (score < 700){
+                        this.obstaclesRangeMin = 1;
+                        this.obstaclesRangeMax = 7;
+                        this.obstacleMoveVelocity = 800;
+                        this.parallaxMoveVelocity = 7;
+                        this.scoreMoveSpeed = 6;
+
+                        this.minObstacleSpawnTime = 500;
+                        this.maxObstacleSpawnTime = 2000;
+                     
+                    }
+                    else if(score < 1400){
+                        this.obstaclesRangeMin = 1;
+                        this.obstaclesRangeMax = 8;
+                        this.obstacleMoveVelocity = 1000;
+                        this.parallaxMoveVelocity = 8;
+                        this.scoreMoveSpeed = 5;
+
+                        this.minObstacleSpawnTime = 750;
+                        this.maxObstacleSpawnTime = 2000;
+                        
+                    }
+                    else{
+                        this.obstaclesRangeMin = 1;
+                        this.obstaclesRangeMax = 8;
+                        this.obstacleMoveVelocity = 1100;
+                        this.parallaxMoveVelocity = 8;
+                        this.scoreMoveSpeed = 4;
+
+                        this.minObstacleSpawnTime = 500;
+                        this.maxObstacleSpawnTime = 2500;
+                   
+                    }
+                }
+
+                function changeColor(){
+                    //Change the color of the sprites every 700 mod
+                    //Change to night mode
+                    
+                    if(this.colorChanged){
+                        return;
+                    }
+
+                    if(score % 700 == 0 && score != 0){
+                        
+                        if(colorChangeCount % 2 == 0){
+                            //Change background color to black, the sprites color to white
+                            colorTint = 0xffffff;
+                            player.tint =  colorTint;
+                            ground.tint = colorTint;
+                            mud.tint = colorTint;
+                            clouds.tint = colorTint;
+                            highscoreLabel.setColor('white');
+                            highscoreText.setColor('white');
+                            scoreText.setColor('white');
+
+                            for(var i = 0 ; i < obstacles.length ; i++){
+                                obstacles[i].tint = colorTint;
+                            }
+                            camera.setBackgroundColor(0x000000);
+
+                            
+                        }
+                        else{
+                            //Change background color to white, the sprites color to grey
+                            colorTint = 0x535353;
+                            player.tint =  colorTint;
+                            ground.tint = colorTint;
+                            mud.tint = colorTint;
+                            clouds.tint = colorTint;
+                            highscoreLabel.setColor('grey');
+                            highscoreText.setColor('grey');
+                            scoreText.setColor('grey');
+
+                            for(var i = 0 ; i < obstacles.length ; i++){
+                                obstacles[i].tint = colorTint;
+                            }
+                            camera.setBackgroundColor(0xffffff);
+
+                        }
+                        colorChangeCount++;
+                        console.log('how many times does it run');
+                    }  
+                }
+
+                function zeroPad(num, places) {
+                    num = num + "";
+                    var zero = places - num.length + 1;
+                    return Array(+(zero > 0 && zero)).join("0") + num;
+                }
+
+
+                function playerDeath(){
+                    console.log('Player is dead');
+                    player.anims.play("dead");
+                    isGameStarted = false;
+                    //this.scene.pause();
+
+                    for(var i = 0 ; i < obstacles.length ; i++){
+                        obstacles[i].body.stop();
+                    }
+
+                    player.disableBody();
+                    deadSFX.play();
+
+                    if(score > highscore){ 
+                            localStorage.setItem('highscore',score);
+                   }
+                    //Game Over
+                    this.add.text(325, 200, 'GAME OVER', { fontFamily: 'font1', fontSize: 24, color: '#474747' });
+                    restart.setActive(true);
+                    gameOver = true;
+                    restart.visible = true;
+                    score = 0;
+                    colorChangeCount = 0;
+                }
+
+            </script>
+    </body>
+</html>
